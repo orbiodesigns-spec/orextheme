@@ -67,7 +67,7 @@ const LandingPage: React.FC<{ onLoginClick: () => void; user?: User | null }> = 
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
             </span>
-            <span className="text-xs font-semibold tracking-wide uppercase text-gray-300">v2.0 Now Live: 24h Free Trial</span>
+            <span className="text-xs font-semibold tracking-wide uppercase text-gray-300">v2.2 Now Live: 24h Free Trial</span>
           </motion.div>
 
           <motion.h1
