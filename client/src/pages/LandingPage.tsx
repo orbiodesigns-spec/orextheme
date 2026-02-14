@@ -15,6 +15,9 @@ interface Layout {
   description: string;
 }
 
+// CHANGE THIS URL TO YOUR CUSTOM THUMBNAIL
+const LANDING_PAGE_THUMBNAIL = "https://q3gf0z7zau.ufs.sh/f/z2xlL3eNwBTSWGUJOLjZMLBYjFxsu12v0Pl8COhgQUqIrkic";
+
 const LandingPage: React.FC<{ onLoginClick: () => void; user?: User | null }> = ({ onLoginClick, user }) => {
   const [layouts, setLayouts] = useState<Layout[]>([]);
   const scrollRef = useRef(null);
@@ -77,7 +80,7 @@ const LandingPage: React.FC<{ onLoginClick: () => void; user?: User | null }> = 
             className="text-6xl md:text-8xl font-black tracking-tighter leading-[0.9] mb-8 text-white"
           >
             Professional overlays <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500">
+            <span className="text-transparent bg-clip-text bg-gradient-to-br from-orange-400 via-red-500 to-pink-500">
               made effortlessly.
             </span>
           </motion.h1>
@@ -120,13 +123,8 @@ const LandingPage: React.FC<{ onLoginClick: () => void; user?: User | null }> = 
           transition={{ duration: 1, delay: 0.5 }}
           className="mt-20 relative w-full max-w-5xl aspect-[16/9] rounded-2xl border border-white/10 shadow-2xl overflow-hidden hidden md:block"
         >
-          {layouts.length > 0 ? (
-            <img src={layouts[0].thumbnail_url} alt="Theme Preview" className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-zinc-900 to-black grid place-items-center">
-              <p className="text-gray-500">Loading Preview...</p>
-            </div>
-          )}
+          {/* Using Hardcoded Thumbnail */}
+          <img src={LANDING_PAGE_THUMBNAIL} alt="Theme Preview" className="w-full h-full object-cover" />
         </motion.div>
       </section>
 
@@ -142,7 +140,7 @@ const LandingPage: React.FC<{ onLoginClick: () => void; user?: User | null }> = 
             {/* Main Feature */}
             <div className="md:col-span-2 md:row-span-2 rounded-3xl p-8 bg-zinc-900/40 border border-white/5 hover:border-blue-500/30 transition-all group relative overflow-hidden flex flex-col justify-end">
               <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/80 z-10"></div>
-              <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center opacity-40 group-hover:scale-105 transition-transform duration-700"></div>
+              <div className="absolute inset-0 bg-[url('https://q3gf0z7zau.ufs.sh/f/z2xlL3eNwBTSXAtPebOPZKbk5ucsAVT6NRajfCeXUlEipo2S')] bg-cover bg-center opacity-40 group-hover:scale-105 transition-transform duration-700"></div>
 
               <div className="relative z-20">
                 <div className="bg-blue-600 w-12 h-12 rounded-xl flex items-center justify-center mb-4 text-white">

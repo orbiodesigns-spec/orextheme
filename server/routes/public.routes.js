@@ -183,4 +183,61 @@ router.get('/installation-videos', async (req, res) => {
     }
 });
 
+// NEW: Verify Coupon
+router.post('/coupons/verify', async (req, res) => {
+    const { code, productId, planId, layoutId } = req.body;
+    try {
+        const [coupons] = await db.query("SELECT * FROM coupons WHERE code = ?", [code]);
+        if (coupons.length === 0) return res.status(404).json({ error: 'Invalid coupon code' });
+
+        const coupon = coupons[0];
+
+        // Check Expiry
+        if (coupon.expiry_date && new Date(coupon.expiry_date) < new Date()) {
+            return res.status(400).json({ error: 'Coupon expired' });
+        }
+
+        // Check Max Uses
+        if (coupon.max_uses !== -1 && coupon.used_count >= coupon.max_uses) {
+            return res.status(400).json({ error: 'Coupon usage limit reached' });
+        }
+
+        // Check Applicability
+        let isValid = true;
+
+        // 1. If coupon is restricted to a Specific Layout
+        if (coupon.layout_id && coupon.layout_id !== layoutId) {
+            // If the request is for a plan/product, this layout coupon might not apply unless we handle that logic users side
+            // But strictly, if coupon has layout_id, it only works for that layout.
+            // If we are buying a PLAN/PRODUCT, layout_id coupon shouldn't work.
+            if (layoutId) isValid = false; // Mismatch
+            else isValid = false; // Buying something else
+        }
+
+        // 2. If coupon is restricted to a Specific Plan
+        if (coupon.plan_id && coupon.plan_id !== planId) {
+            isValid = false;
+        }
+
+        // 3. If coupon is restricted to a Specific Product
+        if (coupon.product_id && Number(coupon.product_id) !== Number(productId)) {
+            isValid = false;
+        }
+
+        if (!isValid) {
+            return res.status(400).json({ error: 'Coupon not applicable to this item' });
+        }
+
+        res.json({
+            success: true,
+            discount_type: coupon.discount_type,
+            discount_value: coupon.discount_value,
+            code: coupon.code
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

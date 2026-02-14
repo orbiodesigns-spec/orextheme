@@ -24,6 +24,13 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
     const [loading, setLoading] = useState(true);
     const [purchasing, setPurchasing] = useState<string | null>(null);
 
+    // Checkout State
+    const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+    const [couponCode, setCouponCode] = useState('');
+    const [discount, setDiscount] = useState<{ type: string; value: number; code: string } | null>(null);
+    const [couponError, setCouponError] = useState('');
+    const [verifyingCoupon, setVerifyingCoupon] = useState(false);
+
     useEffect(() => {
         api.getSubscriptionPlans()
             .then(setPlans)
@@ -41,13 +48,38 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
         });
     };
 
-    const handleSubscribe = async (plan: Plan) => {
-        if (!user) {
-            onLoginClick();
-            return;
+    const handleApplyCoupon = async () => {
+        if (!couponCode.trim() || !selectedPlan) return;
+        setVerifyingCoupon(true);
+        setCouponError('');
+        try {
+            const res = await api.verifyCoupon(couponCode, { planId: selectedPlan.id });
+            setDiscount(res);
+        } catch (err: any) {
+            setCouponError(err.message || 'Invalid Coupon');
+            setDiscount(null);
+        } finally {
+            setVerifyingCoupon(false);
         }
+    };
 
-        setPurchasing(plan.id);
+    const getFinalPrice = () => {
+        if (!selectedPlan) return 0;
+        let price = selectedPlan.price;
+        if (discount) {
+            if (discount.discount_type === 'PERCENT') {
+                price -= (price * discount.discount_value / 100);
+            } else {
+                price -= discount.discount_value;
+            }
+        }
+        return Math.max(0, price);
+    };
+
+    const handleProceedToPay = async () => {
+        if (!user || !selectedPlan) return;
+
+        setPurchasing(selectedPlan.id);
         try {
             const res = await loadRazorpay();
             if (!res) {
@@ -55,20 +87,22 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
                 return;
             }
 
-            const orderData = await api.createPaymentOrder(plan.id, user.phone_number || '');
+            // Create Order with Coupon
+            const orderData = await api.createPaymentOrder(selectedPlan.id, user.phone_number || '', discount?.code);
 
             const options = {
                 key: orderData.keyId,
                 amount: orderData.amount,
                 currency: orderData.currency,
                 name: 'StreamTheme Pro',
-                description: `Subscribe to ${plan.name}`,
+                description: `Subscribe to ${selectedPlan.name}`,
                 order_id: orderData.orderId,
                 handler: async function (response: any) {
                     try {
                         const verifyRes = await api.verifyPayment({
                             ...response,
-                            planId: plan.id
+                            planId: selectedPlan.id,
+                            couponCode: discount?.code
                         });
 
                         if (verifyRes.status === 'SUCCESS') {
@@ -90,13 +124,28 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
 
             const rzp1 = new (window as any).Razorpay(options);
             rzp1.open();
+            // Close modal implies successful open, but actually we wait for handler.
+            // But UI wise, we can close or keep open "Processing..."
+            setSelectedPlan(null); // Close modal to avoid double pay
+            setDiscount(null);
+            setCouponCode('');
 
         } catch (err: any) {
             console.error(err);
             alert(err.message || 'Subscription failed');
-        } finally {
-            setPurchasing(null);
+            setPurchasing(null); // Reset if failed
         }
+    };
+
+    const openCheckout = (plan: Plan) => {
+        if (!user) {
+            onLoginClick();
+            return;
+        }
+        setSelectedPlan(plan);
+        setCouponCode('');
+        setDiscount(null);
+        setCouponError('');
     };
 
     return (
@@ -161,7 +210,7 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
                                 </ul>
 
                                 <button
-                                    onClick={() => handleSubscribe(plan)}
+                                    onClick={() => openCheckout(plan)}
                                     disabled={purchasing === plan.id}
                                     className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${plan.id === 'yearly' ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-white text-black hover:bg-gray-200'} shadow-lg disabled:opacity-50`}
                                 >
@@ -172,6 +221,79 @@ const PricingPage: React.FC<Props> = ({ user, onLoginClick }) => {
                     </div>
                 )}
             </section>
+
+            {/* Checkout Modal */}
+            {selectedPlan && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-zinc-900 border border-white/10 rounded-2xl max-w-md w-full p-6 relative">
+                        <button
+                            onClick={() => setSelectedPlan(null)}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-white"
+                        >
+                            ✕
+                        </button>
+
+                        <h2 className="text-2xl font-bold text-white mb-2">Checkout</h2>
+                        <p className="text-gray-400 mb-6">{selectedPlan.name}</p>
+
+                        <div className="space-y-4 mb-6">
+                            <div className="flex justify-between items-center text-gray-300">
+                                <span>Price</span>
+                                <span>₹{selectedPlan.price}</span>
+                            </div>
+
+                            {/* Coupon Section */}
+                            <div className="flex gap-2">
+                                <input
+                                    placeholder="Coupon Code"
+                                    className="bg-black border border-white/10 rounded-lg px-3 py-2 text-white flex-1 focus:border-blue-500 outline-none uppercase"
+                                    value={couponCode}
+                                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                                    disabled={!!discount}
+                                />
+                                {discount ? (
+                                    <button
+                                        onClick={() => { setDiscount(null); setCouponCode(''); }}
+                                        className="text-red-400 hover:text-red-300 px-3 text-sm font-bold"
+                                    >
+                                        Remove
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={handleApplyCoupon}
+                                        disabled={verifyingCoupon || !couponCode}
+                                        className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-bold disabled:opacity-50"
+                                    >
+                                        {verifyingCoupon ? '...' : 'Apply'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {couponError && <p className="text-red-500 text-sm">{couponError}</p>}
+
+                            {discount && (
+                                <div className="flex justify-between items-center text-green-400">
+                                    <span>Discount ({discount.code})</span>
+                                    <span>-₹{(selectedPlan.price - getFinalPrice()).toFixed(2)}</span>
+                                </div>
+                            )}
+
+                            <div className="border-t border-white/10 pt-4 flex justify-between items-center text-xl font-bold text-white">
+                                <span>Total</span>
+                                <span>₹{getFinalPrice().toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleProceedToPay}
+                            disabled={purchasing === selectedPlan.id}
+                            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50"
+                        >
+                            {purchasing === selectedPlan.id ? 'Processing...' : `Pay ₹${getFinalPrice().toFixed(2)}`}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

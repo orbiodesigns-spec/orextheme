@@ -5,26 +5,36 @@ import { Tag, Trash2, Plus, X } from 'lucide-react';
 const AdminCouponsPage: React.FC<{ token: string }> = ({ token }) => {
     const [coupons, setCoupons] = useState<any[]>([]);
     const [layouts, setLayouts] = useState<any[]>([]);
+    const [plans, setPlans] = useState<any[]>([]);
+    const [products, setProducts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [isCreating, setIsCreating] = useState(false);
 
     // Form Stats
+    const [targetType, setTargetType] = useState<'LAYOUT' | 'PLAN' | 'PRODUCT'>('LAYOUT');
     const [formData, setFormData] = useState({
         code: '',
         discount_type: 'PERCENT',
         discount_value: 0,
         description: '',
-        layout_id: ''
+        layout_id: '',
+        plan_id: '',
+        product_id: '',
+        target_id: '' // Helpers
     });
 
     const fetchData = async () => {
         try {
-            const [cData, lData] = await Promise.all([
+            const [cData, lData, pData, prodData] = await Promise.all([
                 api.admin.getCoupons(token),
-                api.admin.getLayouts(token)
+                api.admin.getLayouts(token),
+                api.admin.getPlans(token),
+                api.admin.getProducts(token)
             ]);
             setCoupons(cData);
             setLayouts(lData);
+            setPlans(pData);
+            setProducts(prodData);
         } catch (err) {
             console.error(err);
         } finally {
@@ -39,9 +49,23 @@ const AdminCouponsPage: React.FC<{ token: string }> = ({ token }) => {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            await api.admin.createCoupon(token, formData);
+            const data: any = {
+                code: formData.code,
+                discount_type: formData.discount_type,
+                discount_value: formData.discount_value,
+                description: formData.description,
+            };
+
+            if (targetType === 'LAYOUT' && formData.target_id) data.layout_id = formData.target_id;
+            if (targetType === 'PLAN' && formData.target_id) data.plan_id = formData.target_id;
+            if (targetType === 'PRODUCT' && formData.target_id) data.product_id = formData.target_id;
+
+            await api.admin.createCoupon(token, data);
             setIsCreating(false);
-            setFormData({ code: '', discount_type: 'PERCENT', discount_value: 0, description: '', layout_id: '' });
+            setFormData({
+                code: '', discount_type: 'PERCENT', discount_value: 0, description: '',
+                layout_id: '', plan_id: '', product_id: '', target_id: ''
+            });
             fetchData(); // Refresh
         } catch (err) {
             alert('Failed to create coupon');
@@ -110,16 +134,64 @@ const AdminCouponsPage: React.FC<{ token: string }> = ({ token }) => {
                             onChange={e => setFormData({ ...formData, discount_value: Number(e.target.value) })}
                             required
                         />
-                        <select
-                            className="bg-black border border-slate-700 rounded p-2 text-white"
-                            value={formData.layout_id}
-                            onChange={e => setFormData({ ...formData, layout_id: e.target.value })}
-                        >
-                            <option value="">Apply to All Layouts</option>
-                            {layouts.map(l => (
-                                <option key={l.id} value={l.id}>{l.name}</option>
-                            ))}
-                        </select>
+
+                        {/* Target Selector */}
+                        <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
+                            <select
+                                className="bg-black border border-slate-700 rounded p-2 text-white"
+                                value={targetType}
+                                onChange={e => {
+                                    setTargetType(e.target.value as any);
+                                    setFormData({ ...formData, target_id: '' });
+                                }}
+                            >
+                                <option value="LAYOUT">Layout Coupon</option>
+                                <option value="PLAN">Subscription Plan Coupon</option>
+                                <option value="PRODUCT">Product Coupon</option>
+                            </select>
+
+                            {targetType === 'LAYOUT' && (
+                                <select
+                                    className="bg-black border border-slate-700 rounded p-2 text-white"
+                                    value={formData.target_id}
+                                    onChange={e => setFormData({ ...formData, target_id: e.target.value })}
+                                >
+                                    <option value="">Select Layout (Optional)</option>
+                                    {layouts.map(l => (
+                                        <option key={l.id} value={l.id}>{l.name}</option>
+                                    ))}
+                                </select>
+                            )}
+
+                            {targetType === 'PLAN' && (
+                                <select
+                                    className="bg-black border border-slate-700 rounded p-2 text-white"
+                                    value={formData.target_id}
+                                    onChange={e => setFormData({ ...formData, target_id: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Select Plan</option>
+                                    {plans.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            )}
+
+                            {targetType === 'PRODUCT' && (
+                                <select
+                                    className="bg-black border border-slate-700 rounded p-2 text-white"
+                                    value={formData.target_id}
+                                    onChange={e => setFormData({ ...formData, target_id: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Select Product</option>
+                                    {products.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
                         <input
                             placeholder="Description (Optional)"
                             className="bg-black border border-slate-700 rounded p-2 text-white md:col-span-2"
@@ -154,7 +226,12 @@ const AdminCouponsPage: React.FC<{ token: string }> = ({ token }) => {
                                     {c.discount_type === 'PERCENT' ? `${c.discount_value}%` : `₹${c.discount_value}`}
                                 </td>
                                 <td className="px-6 py-4 text-xs">{c.discount_type}</td>
-                                <td className="px-6 py-4 text-sm">{c.layout_name || 'All Layouts'}</td>
+                                <td className="px-6 py-4 text-sm">
+                                    {c.layout_name ? `Layout: ${c.layout_name}` :
+                                        c.plan_name ? `Plan: ${c.plan_name}` :
+                                            c.product_name ? `Product: ${c.product_name}` :
+                                                'All'}
+                                </td>
                                 <td className="px-6 py-4">
                                     <button
                                         onClick={() => handleDelete(c.code)}

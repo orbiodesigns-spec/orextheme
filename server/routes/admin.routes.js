@@ -200,9 +200,14 @@ router.put('/users/:id/subscription/revoke', verifyToken, async (req, res) => {
 router.get('/coupons', verifyToken, async (req, res) => {
     try {
         const [rows] = await db.query(`
-            SELECT c.*, l.name as layout_name 
+            SELECT c.*, 
+                   l.name as layout_name,
+                   p.name as plan_name,
+                   prod.name as product_name
             FROM coupons c 
             LEFT JOIN layouts l ON c.layout_id = l.id 
+            LEFT JOIN subscription_plans p ON c.plan_id = p.id
+            LEFT JOIN products prod ON c.product_id = prod.id
             ORDER BY c.created_at DESC
         `);
         res.json(rows);
@@ -213,12 +218,12 @@ router.get('/coupons', verifyToken, async (req, res) => {
 
 // 20. ADMIN: CREATE COUPON
 router.post('/coupons', verifyToken, async (req, res) => {
-    const { code, discount_type, discount_value, description, layout_id } = req.body;
+    const { code, discount_type, discount_value, description, layout_id, plan_id, product_id } = req.body;
     try {
         await db.query(
-            `INSERT INTO coupons(code, discount_type, discount_value, description, layout_id)
-VALUES(?, ?, ?, ?, ?)`,
-            [code, discount_type, discount_value, description, layout_id || null]
+            `INSERT INTO coupons(code, discount_type, discount_value, description, layout_id, plan_id, product_id)
+VALUES(?, ?, ?, ?, ?, ?, ?)`,
+            [code, discount_type, discount_value, description, layout_id || null, plan_id || null, product_id || null]
         );
         res.json({ success: true, message: 'Coupon created' });
     } catch (err) {

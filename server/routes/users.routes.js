@@ -69,22 +69,48 @@ router.post('/trial/start', verifyToken, async (req, res) => {
 
 // 7. CREATE PAYMENT ORDER
 router.post('/payment/create-order', verifyToken, async (req, res) => {
-    const { planId, customerPhone } = req.body;
-    log(`[PAYMENT] Create Order for Plan: ${planId}, User: ${req.user.id}`, 'DEBUG');
+    const { planId, customerPhone, couponCode } = req.body;
+    log(`[PAYMENT] Create Order for Plan: ${planId}, User: ${req.user.id}, Coupon: ${couponCode || 'None'}`, 'DEBUG');
 
     try {
         const [plans] = await db.query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         if (plans.length === 0) return res.status(404).json({ error: 'Plan not found' });
         const plan = plans[0];
 
+        let finalPrice = parseFloat(plan.price);
+        let couponId = null;
+
+        // Verify Coupon if provided
+        if (couponCode) {
+            const [coupons] = await db.query("SELECT * FROM coupons WHERE code = ?", [couponCode]);
+            if (coupons.length > 0) {
+                const coupon = coupons[0];
+                // Check Validity (Expiry, Max Uses, Plan Match)
+                let isValid = true;
+                if (coupon.expiry_date && new Date(coupon.expiry_date) < new Date()) isValid = false;
+                if (coupon.max_uses !== -1 && coupon.used_count >= coupon.max_uses) isValid = false;
+                if (coupon.plan_id && coupon.plan_id !== planId) isValid = false;
+
+                if (isValid) {
+                    if (coupon.discount_type === 'PERCENT') {
+                        finalPrice -= (finalPrice * coupon.discount_value / 100);
+                    } else {
+                        finalPrice -= coupon.discount_value;
+                    }
+                    if (finalPrice < 0) finalPrice = 0;
+                    couponId = coupon.id;
+                }
+            }
+        }
+
         // Ensure amount is in Paise
-        const amountPaise = Math.round(parseFloat(plan.price) * 100);
+        const amountPaise = Math.round(finalPrice * 100);
 
         const options = {
             amount: amountPaise,
             currency: "INR",
             receipt: `rcpt_${req.user.id}_${Date.now()}`,
-            notes: { userId: req.user.id.toString(), planId, email: req.user.email }
+            notes: { userId: req.user.id.toString(), planId, email: req.user.email, couponCode: couponCode || '' }
         };
 
         const order = await razorpay.orders.create(options);
@@ -97,7 +123,8 @@ router.post('/payment/create-order', verifyToken, async (req, res) => {
             keyId: process.env.RAZORPAY_KEY_ID,
             contact: customerPhone,
             email: req.user.email,
-            planId: planId
+            planId: planId,
+            couponCode: couponCode
         });
     } catch (err) {
         log(`[PAYMENT] Create Error: ${err.message}`, 'ERROR');
@@ -108,8 +135,8 @@ router.post('/payment/create-order', verifyToken, async (req, res) => {
 // 8. VERIFY PAYMENT
 // 8. VERIFY PAYMENT
 router.post('/payment/verify', verifyToken, async (req, res) => {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId } = req.body;
-    log(`[PAYMENT] Verify Request: ${razorpay_order_id}`, 'DEBUG');
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId, couponCode } = req.body;
+    log(`[PAYMENT] Verify Request: ${razorpay_order_id} Coupon: ${couponCode}`, 'DEBUG');
 
     try {
         const body = razorpay_order_id + "|" + razorpay_payment_id;
@@ -125,6 +152,27 @@ router.post('/payment/verify', verifyToken, async (req, res) => {
 
         const [plans] = await db.query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         const plan = plans[0];
+
+        // Fetch order to get accurate price paid (or trust client logic, but better to fetch from razorpay or just use plan price and apply coupon again?)
+        // Simple approach: Apply coupon logic again to determine price_paid recorded in DB
+        let pricePaid = parseFloat(plan.price);
+        if (couponCode) {
+            const [coupons] = await db.query("SELECT * FROM coupons WHERE code = ?", [couponCode]);
+            if (coupons.length > 0) {
+                const coupon = coupons[0];
+                // Increment usage
+                await db.query("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?", [coupon.id]);
+
+                // Recalc price
+                if (coupon.discount_type === 'PERCENT') {
+                    pricePaid -= (pricePaid * coupon.discount_value / 100);
+                } else {
+                    pricePaid -= coupon.discount_value;
+                }
+                if (pricePaid < 0) pricePaid = 0;
+            }
+        }
+
         const now = new Date();
         const expiry = new Date();
         expiry.setMonth(expiry.getMonth() + plan.duration_months);
@@ -133,14 +181,14 @@ router.post('/payment/verify', verifyToken, async (req, res) => {
         await db.query(`
             INSERT INTO subscriptions (user_id, layout_id, plan_id, start_date, expiry_date, price_paid, order_id, payment_id, status, public_token)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-        `, [req.user.id, 'master-standard', planId, now, expiry, plan.price, razorpay_order_id, razorpay_payment_id, publicToken]);
+        `, [req.user.id, 'master-standard', planId, now, expiry, pricePaid, razorpay_order_id, razorpay_payment_id, publicToken]);
 
         log(`[PAYMENT] Subscription Activated for User ${req.user.id}`, 'INFO');
 
         // Fetch User Info for Email
         const [users] = await db.query('SELECT full_name, email FROM users WHERE id = ?', [req.user.id]);
         if (users.length > 0) {
-            await sendSubscriptionActivatedEmail(users[0].email, users[0].full_name, plan.name, expiry, plan.price);
+            await sendSubscriptionActivatedEmail(users[0].email, users[0].full_name, plan.name, expiry, pricePaid);
         }
 
         res.json({ status: 'SUCCESS', message: 'Subscription Activated!' });
@@ -201,20 +249,43 @@ router.post('/purchases/config', verifyToken, async (req, res) => {
 
 // 9. CREATE PRODUCT ORDER
 router.post('/payment/create-product-order', verifyToken, async (req, res) => {
-    const { productId, contact } = req.body;
+    const { productId, contact, couponCode } = req.body;
     try {
         const [products] = await db.query('SELECT * FROM products WHERE id = ?', [productId]);
         if (products.length === 0) return res.status(404).json({ error: 'Product not found' });
         const product = products[0];
 
+        let finalPrice = parseFloat(product.price);
+
+        // Verify Coupon
+        if (couponCode) {
+            const [coupons] = await db.query("SELECT * FROM coupons WHERE code = ?", [couponCode]);
+            if (coupons.length > 0) {
+                const coupon = coupons[0];
+                let isValid = true;
+                if (coupon.expiry_date && new Date(coupon.expiry_date) < new Date()) isValid = false;
+                if (coupon.max_uses !== -1 && coupon.used_count >= coupon.max_uses) isValid = false;
+                if (coupon.product_id && Number(coupon.product_id) !== Number(productId)) isValid = false;
+
+                if (isValid) {
+                    if (coupon.discount_type === 'PERCENT') {
+                        finalPrice -= (finalPrice * coupon.discount_value / 100);
+                    } else {
+                        finalPrice -= coupon.discount_value;
+                    }
+                    if (finalPrice < 0) finalPrice = 0;
+                }
+            }
+        }
+
         // Ensure amount is in Paise
-        const amountPaise = Math.round(parseFloat(product.price) * 100);
+        const amountPaise = Math.round(finalPrice * 100);
 
         const options = {
             amount: amountPaise,
             currency: "INR",
             receipt: `prod_${req.user.id}_${Date.now()}`,
-            notes: { userId: req.user.id.toString(), productId: productId.toString(), type: 'product' }
+            notes: { userId: req.user.id.toString(), productId: productId.toString(), type: 'product', couponCode: couponCode || '' }
         };
 
         const order = await razorpay.orders.create(options);
@@ -226,7 +297,8 @@ router.post('/payment/create-product-order', verifyToken, async (req, res) => {
             keyId: process.env.RAZORPAY_KEY_ID,
             contact: contact,
             email: req.user.email,
-            productId: productId
+            productId: productId,
+            couponCode: couponCode
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -235,7 +307,7 @@ router.post('/payment/create-product-order', verifyToken, async (req, res) => {
 
 // 10. VERIFY PRODUCT PAYMENT
 router.post('/payment/verify-product', verifyToken, async (req, res) => {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, productId } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, productId, couponCode } = req.body;
     try {
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = require('crypto')
@@ -250,11 +322,27 @@ router.post('/payment/verify-product', verifyToken, async (req, res) => {
         const [products] = await db.query('SELECT * FROM products WHERE id = ?', [productId]);
         const product = products[0];
 
+        let pricePaid = parseFloat(product.price);
+        if (couponCode) {
+            const [coupons] = await db.query("SELECT * FROM coupons WHERE code = ?", [couponCode]);
+            if (coupons.length > 0) {
+                const coupon = coupons[0];
+                await db.query("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?", [coupon.id]);
+
+                if (coupon.discount_type === 'PERCENT') {
+                    pricePaid -= (pricePaid * coupon.discount_value / 100);
+                } else {
+                    pricePaid -= coupon.discount_value;
+                }
+                if (pricePaid < 0) pricePaid = 0;
+            }
+        }
+
         // Record Purchase
         await db.query(`
             INSERT INTO product_purchases (user_id, product_id, transaction_id, price_paid)
             VALUES (?, ?, ?, ?)
-        `, [req.user.id, productId, razorpay_payment_id, product.price]);
+        `, [req.user.id, productId, razorpay_payment_id, pricePaid]);
 
         // Return the secure link
         res.json({

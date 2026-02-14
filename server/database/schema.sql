@@ -135,11 +135,15 @@ CREATE TABLE coupons (
     discount_value DECIMAL(10, 2) NOT NULL,
     description TEXT,
     layout_id VARCHAR(50),
+    plan_id VARCHAR(50),
+    product_id BIGINT UNSIGNED,
     max_uses INT DEFAULT -1,
     used_count INT DEFAULT 0,
     expiry_date DATETIME,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (layout_id) REFERENCES layouts(id) ON DELETE SET NULL
+    FOREIGN KEY (layout_id) REFERENCES layouts(id) ON DELETE SET NULL,
+    FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE SET NULL,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
 );
 
 -- 9. ADMINS

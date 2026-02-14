@@ -216,13 +216,33 @@ async function initDb() {
                 discount_value DECIMAL(10, 2) NOT NULL,
                 description TEXT,
                 layout_id VARCHAR(50),
+                plan_id VARCHAR(50),
+                product_id BIGINT UNSIGNED,
                 max_uses INT DEFAULT -1,
                 used_count INT DEFAULT 0,
                 expiry_date DATETIME,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (layout_id) REFERENCES layouts(id) ON DELETE SET NULL
+                FOREIGN KEY (layout_id) REFERENCES layouts(id) ON DELETE SET NULL,
+                FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE SET NULL,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
             )
         `);
+
+        // Check for missing columns in coupons (Migration for existing DB)
+        try {
+            await db.query("ALTER TABLE coupons ADD COLUMN plan_id VARCHAR(50) AFTER layout_id");
+            await db.query("ALTER TABLE coupons ADD CONSTRAINT fk_coupons_plan FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE SET NULL");
+            console.log("Migrated coupons table: Added plan_id");
+        } catch (err) {
+            // Ignore if exists
+        }
+        try {
+            await db.query("ALTER TABLE coupons ADD COLUMN product_id BIGINT UNSIGNED AFTER plan_id");
+            await db.query("ALTER TABLE coupons ADD CONSTRAINT fk_coupons_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL");
+            console.log("Migrated coupons table: Added product_id");
+        } catch (err) {
+            // Ignore if exists
+        }
 
         // 9. Admins
         await db.query(`

@@ -162,12 +162,25 @@ export const api = {
     return res.json();
   },
 
-  createPaymentOrder: async (planId: string, customerPhone: string): Promise<any> => {
+  verifyCoupon: async (code: string, context: { productId?: string, planId?: string, layoutId?: string }): Promise<{ success: boolean; discount_type: string; discount_value: number; code: string }> => {
+    const res = await fetch(`${API_Base}/coupons/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, ...context })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Invalid Coupon');
+    }
+    return res.json();
+  },
+
+  createPaymentOrder: async (planId: string, customerPhone: string, couponCode?: string): Promise<any> => {
     const res = await fetch(`${API_Base}/payment/create-order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ planId, customerPhone })
+      body: JSON.stringify({ planId, customerPhone, couponCode })
     });
     if (!res.ok) {
       const err = await res.json();
@@ -186,12 +199,12 @@ export const api = {
     return res.json();
   },
 
-  createProductOrder: async (productId: string, customerPhone: string): Promise<any> => {
+  createProductOrder: async (productId: string, customerPhone: string, couponCode?: string): Promise<any> => {
     const res = await fetch(`${API_Base}/payment/create-product-order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ productId, customerPhone })
+      body: JSON.stringify({ productId, customerPhone, couponCode })
     });
     if (!res.ok) {
       const err = await res.json();
