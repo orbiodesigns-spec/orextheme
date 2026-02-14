@@ -6,7 +6,7 @@ import styles from './Layout.module.css';
 import batsman1Gif from './assets/bating.gif';
 import batsman2Gif from './assets/bating.gif';
 import bowlerGif from './assets/bowling.gif';
-import mandala from './assets/Mandala.png';
+import mandala from './assets/mandala.png';
 
 interface Props {
     theme: ThemeConfig;
